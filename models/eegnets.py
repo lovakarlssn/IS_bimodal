@@ -20,13 +20,12 @@ class CompactEEGNet(nn.Module):
             nn.ELU(), nn.AvgPool2d((1, 8)), nn.Dropout(0.25)
         )
         
-        # Dynamic flattening
         with torch.no_grad():
             dummy = torch.zeros(1, 1, input_chans, input_time)
             self.feature_dim = self.block2(self.block1(dummy)).numel()
-            
         self.classifier = nn.Linear(self.feature_dim, nb_classes)
 
     def forward(self, x):
-        x = self.block2(self.block1(x))
+        x = self.block1(x)
+        x = self.block2(x)
         return self.classifier(x.view(x.size(0), -1))
