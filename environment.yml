@@ -1,0 +1,41 @@
+name: thesis_env
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10                
+  
+  # --- Standard Science Stack ---
+  - numpy
+  - pandas
+  - scipy
+  - scikit-learn
+  - matplotlib
+  - seaborn
+  - h5py                       # Useful for large dataset storage
+  
+  # --- EEG & fMRI Libraries ---
+  - mne                        # EEG analysis
+  - nilearn                    # fMRI statistical analysis & plotting
+  - nibabel                    # Read/Write neuroimaging files (NIfTI, GIFTI)
+  
+  # --- Jupyter & Tools ---
+  - jupyter
+  - jupyterlab
+  - tqdm
+  - ipykernel                  
+  - pip                        
+  
+  # --- Deep Learning (PyTorch) ---
+  - pytorch
+  - torchvision
+  - torchaudio
+  - pytorch-cuda=11.8          
+
+  - pip:
+    - torchinfo                # Model summary
+    - moabb                    # BCI benchmarks
+    - pyriemann                # Covariance matrices
+    - pybids                   # (Optional) Helper for BIDS formatted datasets

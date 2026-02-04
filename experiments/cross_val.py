@@ -7,6 +7,7 @@ from utils.processing import prepare_tensors
 from models.eegnets import CompactEEGNet
 from tqdm import tqdm
 import config
+import numpy as np
 
 def run_cv_experiment(X, y, groups, n_classes, label):
     skf = StratifiedGroupKFold(n_splits=5, shuffle=True, random_state=42)
