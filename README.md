@@ -15,8 +15,7 @@ This research is divided into four distinct phases. We are currently in **Phase 
     
 - [ ] **Phase 2: Classification**
     - Fusion Strategy Benchmarking
-    - Measure fusion gain
-    - Benchmark different fusion strategies
+    - Measure Fusion Gain
 - [ ] **Phase 3: Generalization (Transfer Learning)**
     - Evaluating Cross-Dataset Generalization
 - [ ] **Phase 4: Final Evaluation**
