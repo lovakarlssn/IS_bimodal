@@ -13,7 +13,7 @@ This research is divided into four distinct phases. We are currently in **Phase 
     - Benchmarking ... augmentations.
 
     
-- [ ] **Phase 2: Classification**
+- [ ] **Phase 2: Classification & Fusion**
     - Fusion Strategy Benchmarking
     - Measure Fusion Gain
 - [ ] **Phase 3: Generalization (Transfer Learning)**
