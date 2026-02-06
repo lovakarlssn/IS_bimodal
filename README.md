@@ -5,9 +5,9 @@
 This research is divided into four distinct phases. We are currently in **Phase 1**.
 
 - [x] **Phase 1: Augmentation** (Current Focus)
-    EEG Augmentation:
+    *EEG Augmentation:*
     - Benchmarking spatial, temporal, and frequency-based augmentations.
-    fMRI Augmentations:
+    *fMRI Augmentations:*
     - Benchmarking ... augmentations.
 
     
@@ -16,7 +16,7 @@ This research is divided into four distinct phases. We are currently in **Phase 
     - Measure fusion gain
     - Benchmark different fusion strategies
 - [ ] **Phase 3: Generalization (Transfer Learning)**
-    - Evaluating cross-dataset generalization
+    - Evaluating Cross-Dataset Generalization
 - [ ] **Phase 4: Final Evaluation**
     - All models will be evaluated using two schemes:
         - Intra-Subject: 5-fold Cross Validation

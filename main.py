@@ -2,12 +2,16 @@ import argparse
 import copy
 import numpy as np
 from sklearn.model_selection import StratifiedKFold, LeaveOneGroupOut
-
-import config
+from sklearn.model_selection import StratifiedKFold, GroupKFold
+from utils.io_utils import plot_history
 from loaders.eeg_loader import load_eeg_dataset
 from experiments.cross_val import run_cv_experiment
-from utils.visualization import plot_history
-
+from experiments.ml_trainer import run_ml_experiment
+from utils.io_utils import save_experiment_results
+import config 
+import json
+import datetime
+import traceback
 
 def run_experiment(exp_name, mode="single", subject_id=1, hyperparams=None, aug_params=None):
     if hyperparams is None:
@@ -55,37 +59,137 @@ def run_experiment(exp_name, mode="single", subject_id=1, hyperparams=None, aug_
     print(f"FINAL RESULT [{exp_name}]: {mean_acc:.2%}")
     return history, mean_acc
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--exp", type=str, default="Original")
-    parser.add_argument("--mode", type=str, default="single")
-    parser.add_argument("--sub", type=int, default=1)
-    parser.add_argument("--lr", type=float, default=config.LEARNING_RATE)
-    parser.add_argument("--epochs", type=int, default=config.EPOCHS)
+
+def get_aug_config(exp_name, lookup_dict):
+    if exp_name == "Original": return None
     
-    args = parser.parse_args()
-
-    cli_hyperparams = {
-        "batch_size": config.BATCH_SIZE,
-        "lr": args.lr,
-        "epochs": args.epochs,
-        "weight_decay": config.WEIGHT_DECAY
+    # Map friendly names to config keys
+    key_map = {
+        "ChannelsDropout": "channels_dropout",
+        "FreqSurrogate": "freq_surrogate",
+        "SmoothTimeMask": "smooth_time_mask",
+        "TimeReverse": "time_reverse",
+        "SignFlip": "sign_flip"
     }
+    
+    key = key_map.get(exp_name)
+    if not key or key not in lookup_dict:
+        raise ValueError(f"Augmentation '{exp_name}' not found in AUG_PARAMS")
+        
+    return {key: lookup_dict[key]}
 
-    exps_to_run = config.EXPERIMENTS if args.exp.lower() == "all" else [args.exp]
-    results_summary = {}
+# ==============================================================================
+#   MAIN RUNNER
+# ==============================================================================
+def run_master_experiments(
+    exp_mode=config.EXP_MODE,
+    data_mode=config.DATA_MODE,
+    subject_id=config.SUBJECT_ID,
+    dl_models=config.DL_MODELS,
+    ml_models=config.ML_MODELS,
+    experiments=config.EXPERIMENTS,   
+    hyperparams=config.HYPERPARAMS,   
+    aug_params=config.AUG_PARAMS,     
+    filename_prefix=None
+):
+    
+    # 1. Setup Filenames
+    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M")
+    prefix = f"{filename_prefix}_" if filename_prefix else ""
+    dl_res_file = f"{prefix}DL_Results_{timestamp}.json"
+    ml_res_file = f"{prefix}ML_Results_{timestamp}.json"
 
-    for current_exp in exps_to_run:
-        hist, acc = run_experiment(
-            current_exp, 
-            mode=args.mode, 
-            subject_id=args.sub, 
-            hyperparams=cli_hyperparams
-        )
-        results_summary[current_exp] = acc
+    # 2. Load Data
+    print(f"\n[MASTER] Loading Data ({data_mode})...")
+    X, y, metadata, n_classes = load_eeg_dataset(mode=data_mode, subject_id=subject_id)
+    
+    if X is None:
+        print("Error: Data not found.")
+        return
 
-    print("\n" + "="*30)
-    print("ALL EXPERIMENTS COMPLETE")
-    for name, score in sorted(results_summary.items(), key=lambda x: x[1], reverse=True):
-        print(f"{name:15}: {score:.2%}")
-    print("="*30)
+    # 3. Setup Splitter (FIXED)
+    if data_mode == "loso":
+        groups = metadata["subject_ids"]
+        # Use LeaveOneGroupOut for strict Subject-independent testing
+        cv_splitter = LeaveOneGroupOut()
+    else:
+        groups = metadata["trial_ids"]
+        cv_splitter = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+
+    # ---------------------------------------------------------
+    # PART A: MACHINE LEARNING (SVM, RF)
+    # ---------------------------------------------------------
+    if exp_mode in ["ML", "BOTH"]:
+        print(f"\n=== ML EXPERIMENTS -> {ml_res_file} ===")
+        ml_results = []
+        
+        for model_name in ml_models:
+            run_id = f"ML_{model_name}_{data_mode}"
+            print(f">>> RUNNING: {run_id}")
+            
+            try:
+                # Note: You need to update run_ml_experiment in ml_trainer.py 
+                # to accept the 'cv_splitter' object if you want it to use this exact split,
+                # otherwise it likely recreates its own internally. 
+                # For consistency, I recommend passing it:
+                acc, f1 = run_ml_experiment(
+                    model_type=model_name, 
+                    mode=data_mode, 
+                    subject_id=subject_id, 
+                    verbose=False
+                    # Ideally pass cv_splitter here too
+                )
+                
+                res = {
+                    "run_id": run_id, "type": "ML", "model": model_name,
+                    "aug": "Original", "accuracy": acc, "f1": f1
+                }
+                ml_results.append(res)
+                save_experiment_results(ml_results, filename=ml_res_file, folder=config.RESULTS_DIR)
+                print(f"   [DONE] Acc: {acc:.2%}")
+            except Exception:
+                print(f"!!! CRASH in {run_id}")
+                traceback.print_exc()
+
+    # ---------------------------------------------------------
+    # PART B: DEEP LEARNING (EEGNet, Transformer)
+    # ---------------------------------------------------------
+    if exp_mode in ["DL", "BOTH"]:
+        print(f"\n=== DL EXPERIMENTS -> {dl_res_file} ===")
+        dl_results = []
+
+        for model_name in dl_models:
+            for exp_name in experiments:
+                
+                run_id = f"DL_{model_name}_{exp_name}_LR{hyperparams['lr']}"
+                print(f">>> RUNNING: {run_id}")
+                
+                try:
+                    current_aug_config = get_aug_config(exp_name, aug_params)
+                    
+                    history, mean_acc = run_cv_experiment(
+                        X, y, groups, n_classes, cv_splitter,
+                        exp_name=exp_name,
+                        aug_params=current_aug_config,
+                        hyperparams=hyperparams, 
+                        model_name=model_name,
+                        verbose=False
+                    )
+                    
+                    res = {
+                        "run_id": run_id, "type": "DL", "model": model_name,
+                        "aug": exp_name, "accuracy": mean_acc,
+                        **hyperparams
+                    }
+                    dl_results.append(res)
+                    save_experiment_results(dl_results, filename=dl_res_file, folder=config.RESULTS_DIR)
+                    print(f"   [DONE] Acc: {mean_acc:.2%}")
+
+                except Exception:
+                    print(f"!!! CRASH in {run_id}")
+                    traceback.print_exc()
+
+    print(f"\n[MASTER] Finished. Results in {config.RESULTS_DIR}")
+
+if __name__ == "__main__":
+    run_master_experiments()
