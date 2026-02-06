@@ -138,7 +138,8 @@ def run_cv_experiment(X, y, groups, n_classes, cv_splitter, exp_name, aug_params
                 history['val_acc'].append(cur_acc)
 
         best_accs.append(f_best_acc)
-        print(f" -> Fold {fold+1} Finished. Best Val Acc: {f_best_acc:.2%}")
+        
+        if verbose: print(f" -> Fold {fold+1} Finished. Best Val Acc: {f_best_acc:.2%}")
 
     # Metadata saving
     with open(os.path.join(log_dir, "metadata.json"), "w") as f:
