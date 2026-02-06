@@ -1,51 +1,52 @@
 import numpy as np
 
-def spatial_shuffle(X, n_swaps=1):
+# --- 1. SPATIAL DOMAIN ---
+def channels_dropout(X, p_drop=0.2):
     X_aug = X.copy()
     N, Ch, T = X_aug.shape
     for i in range(N):
-        for _ in range(n_swaps):
-            a, b = np.random.choice(Ch, 2, replace=False)
-            X_aug[i, a, :], X_aug[i, b, :] = X_aug[i, b, :].copy(), X_aug[i, a, :].copy()
+        mask = np.random.binomial(1, 1 - p_drop, size=(Ch, 1))
+        X_aug[i] = X_aug[i] * mask
     return X_aug
 
-def time_slice(X, y, slice_len=716, n_slices=2, stride=None):
-    N, Ch, T = X.shape
-    X_slices, y_slices = [], []
-    for i in range(N):
-        if stride is not None:
-            starts = np.arange(0, T - slice_len + 1, stride)
-            for s in starts:
-                X_slices.append(X[i, :, s : s + slice_len])
-                y_slices.append(y[i])
-        else:
-            for _ in range(n_slices):
-                s = np.random.randint(0, T - slice_len + 1)
-                X_slices.append(X[i, :, s : s + slice_len])
-                y_slices.append(y[i])
-    return np.array(X_slices), np.array(y_slices)
-
-def freq_surrogate(X, phase_noise_std=0.5):
+# --- 2. FREQUENCY DOMAIN (The Winner: FT Surrogate) ---
+def freq_surrogate(X, phase_noise_max=0.5):
     X_aug = np.zeros_like(X)
     N, Ch, T = X.shape
     for i in range(N):
-        for c in range(Ch):
-            f_transform = np.fft.rfft(X[i, c, :])
-            magnitudes = np.abs(f_transform)
-            phases = np.angle(f_transform)
-            noise = np.random.normal(0, phase_noise_std, size=phases.shape)
-            new_f_transform = magnitudes * np.exp(1j * (phases + noise))
-            X_aug[i, c, :] = np.fft.irfft(new_f_transform, n=T)
+        f_transform = np.fft.rfft(X[i], axis=-1) 
+        n_freqs = f_transform.shape[-1]
+        delta_phi = np.random.uniform(0, phase_noise_max, size=(1, n_freqs))
+        perturbation = np.exp(1j * delta_phi)
+        new_f_transform = f_transform * perturbation
+        # Added .real to ensure no complex residual gradients crash the model
+        X_aug[i] = np.fft.irfft(new_f_transform, n=T, axis=-1).real
+    return X_aug
+
+# --- 3. TIME DOMAIN ---
+def time_reverse(X):
+    return np.flip(X, axis=-1)
+
+def smooth_time_mask(X, mask_len_samples=100):
+    X_aug = X.copy()
+    N, Ch, T = X_aug.shape
+    for i in range(N):
+        t_start = np.random.randint(0, T - mask_len_samples)
+        t_end = t_start + mask_len_samples
+        mask = np.ones(T)
+        mask[t_start : t_end] = 0
+        X_aug[i] = X_aug[i] * mask[np.newaxis, :]
     return X_aug
 
 def get_augmentation(name, X, y, params):
-    """Factory to return (X_total, y_total) for consistent comparison."""
-    if name == "Spatial_Shuffle":
-        X_aug = spatial_shuffle(X, **params["spatial_shuffle"])
-        return np.concatenate([X, X_aug]), np.concatenate([y, y])
-    elif name == "Freq_Surrogate":
-        X_aug = freq_surrogate(X, **params["freq_surrogate"])
-        return np.concatenate([X, X_aug]), np.concatenate([y, y])
-    elif name == "Time_Slicing":
-        return time_slice(X, y, **params["time_slice"])
-    return X, y # Original Baseline
+    if name == "ChannelsDropout":
+        X_aug = channels_dropout(X, **params.get("channels_dropout", {}))
+    elif name == "FTSurrogate":
+        X_aug = freq_surrogate(X, **params.get("freq_surrogate", {}))
+    elif name == "TimeReverse":
+        X_aug = time_reverse(X)
+    elif name == "SmoothTimeMask":
+        X_aug = smooth_time_mask(X, **params.get("smooth_time_mask", {}))
+    else:
+        return X, y
+    return np.concatenate([X, X_aug]), np.concatenate([y, y])

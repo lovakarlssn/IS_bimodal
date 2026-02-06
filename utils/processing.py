@@ -4,9 +4,6 @@ import torch
 from sklearn.preprocessing import StandardScaler
 import config
 
-def get_groups(n_samples):
-    factor = n_samples // config.BASE_TRIALS
-    return np.repeat(np.arange(config.BASE_TRIALS), factor)[:n_samples]
 
 def prepare_tensors(X_tr_raw, X_val_raw, y_tr_raw, y_val_raw):
     N_tr, Ch, T = X_tr_raw.shape
@@ -16,7 +13,7 @@ def prepare_tensors(X_tr_raw, X_val_raw, y_tr_raw, y_val_raw):
     X_tr_flat = X_tr_raw.reshape(N_tr, -1)
     X_val_flat = X_val_raw.reshape(N_val, -1)
     
-    # LEAKAGE PREVENTION: Fit only on Train
+    
     X_tr_sc = scaler.fit_transform(X_tr_flat).reshape(N_tr, 1, Ch, T)
     X_val_sc = scaler.transform(X_val_flat).reshape(N_val, 1, Ch, T)
     
@@ -25,14 +22,41 @@ def prepare_tensors(X_tr_raw, X_val_raw, y_tr_raw, y_val_raw):
             torch.FloatTensor(X_val_sc).to(config.DEVICE),
             torch.LongTensor(y_val_raw).to(config.DEVICE))
     
+def prepare_tensors(X_tr_raw, X_val_raw, y_tr_raw, y_val_raw):
+    """Per-Trial Scaling: Each trial is normalized independently to prevent leakage."""
+
+    X_tr = torch.FloatTensor(X_tr_raw)
+    X_val = torch.FloatTensor(X_val_raw)
+    mean_tr = X_tr.mean(dim=(1, 2), keepdim=True)
+    std_tr = X_tr.std(dim=(1, 2), keepdim=True)
+    X_tr = (X_tr - mean_tr) / (std_tr + 1e-6) 
     
+    
+    mean_val = X_val.mean(dim=(1, 2), keepdim=True)
+    std_val = X_val.std(dim=(1, 2), keepdim=True)
+    X_val = (X_val - mean_val) / (std_val + 1e-6)
+
+    
+    if X_tr.ndim == 3:
+        X_tr = X_tr.unsqueeze(1)
+        X_val = X_val.unsqueeze(1)
+        
+    return (X_tr.to(config.DEVICE), 
+            torch.LongTensor(y_tr_raw).to(config.DEVICE),
+            X_val.to(config.DEVICE), 
+            torch.LongTensor(y_val_raw).to(config.DEVICE))
 def get_groups(n_samples, base_size=320):
     """
-    If we have 640 samples (Original + Aug), 
-    groups are [0..319, 0..319] to keep siblings together.
+    Generates groups to keep original and augmented trials together.
+    Assumes data is stacked: [Original ... | Aug_1 ... | Aug_2 ...]
     """
+    
     if n_samples == base_size:
         return np.arange(base_size)
     
-    factor = n_samples // base_size
-    return np.repeat(np.arange(base_size), factor)[:n_samples]
+    
+    n_copies = n_samples 
+    
+    
+    
+    return np.tile(np.arange(base_size), n_copies)[:n_samples]

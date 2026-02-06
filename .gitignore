@@ -1,5 +1,9 @@
-/data
 /OTHER
-/__pycache__/
+/data
+*/__pycache__/
 *.log
+*.json
 /.vscode/
+/initial_runs
+test.py
+/runs
