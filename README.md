@@ -4,10 +4,10 @@
 
 This research is divided into four distinct phases. We are currently in **Phase 1**.
 
-- [x] **Phase 1: Augmentation** (Current Focus) \
+- [x] **Phase 1: Augmentation** (Current Focus)
     
     *EEG Augmentations:*
-    - Benchmarking spatial, temporal, and frequency-based augmentations. \ 
+    - Benchmarking spatial, temporal, and frequency-based augmentations.
     
     *fMRI Augmentations:*
     - Benchmarking ... augmentations.
