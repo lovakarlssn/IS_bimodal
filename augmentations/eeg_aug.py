@@ -1,3 +1,4 @@
+# augmentations/eeg_aug.py
 import numpy as np
 
 # --- 1. SPATIAL DOMAIN ---

@@ -1,5 +1,5 @@
 /OTHER
-/data
+*.npy
 */__pycache__/
 *.log
 *.json
@@ -7,3 +7,5 @@
 /initial_runs
 test.py
 /runs
+/data_save
+/notebooks

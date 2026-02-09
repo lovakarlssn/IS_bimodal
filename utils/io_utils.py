@@ -15,7 +15,6 @@ def plot_history(history, title="Cross-Validation Training History"):
         max_len = max(len(f) for f in data)
         return np.array([f + [np.nan] * (max_len - len(f)) for f in data])
 
-    
     tr_loss = get_padded_matrix('train_loss')
     va_loss = get_padded_matrix('val_loss')
     tr_acc  = get_padded_matrix('train_acc')

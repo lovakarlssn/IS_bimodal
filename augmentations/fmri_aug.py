@@ -1,3 +1,5 @@
+# augmentations/fmri_aug.py
+import numpy as np
 
 
 def spatial_smoothing():
@@ -5,3 +7,4 @@ def spatial_smoothing():
 
 def intensity_normalization():
     pass
+

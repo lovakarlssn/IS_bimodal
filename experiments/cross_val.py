@@ -15,14 +15,14 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from augmentations.eeg_aug import get_augmentation
 from models.transformer import SpectroTemporalTransformer
-from models.eegnets import *
+from models.eeg_models import *
 import config
 
 class EEGStochasticDataset(Dataset):
-    def __init__(self, X, y, exp_name, aug_params, multiplier=4, p_aug=0.5):
+    def __init__(self, X, y, aug_name, aug_params, multiplier=4, p_aug=0.5):
         self.X = X
         self.y = y
-        self.exp_name = exp_name
+        self.aug_name = aug_name
         self.aug_params = aug_params
         self.multiplier = multiplier
         self.p_aug = p_aug
@@ -36,9 +36,9 @@ class EEGStochasticDataset(Dataset):
         x = self.X[real_idx].copy()
         label = self.y[real_idx]
 
-        if self.exp_name not in ["Original", "Non_Augmented"]:
+        if self.aug_name not in ["Original", "Non_Augmented"]:
             if np.random.rand() < self.p_aug:
-                x_pair, _ = get_augmentation(self.exp_name, x[np.newaxis, ...], [label], self.aug_params)
+                x_pair, _ = get_augmentation(self.aug_name, x[np.newaxis, ...], [label], self.aug_params)
                 x = x_pair[1] 
 
         x_tensor = torch.tensor(x, dtype=torch.float32)
@@ -47,7 +47,7 @@ class EEGStochasticDataset(Dataset):
             
         return x_tensor, torch.tensor(label, dtype=torch.long)
 
-def run_cv_experiment(X, y, groups, n_classes, cv_splitter, exp_name, aug_params, hyperparams, model_name="EEGNet", verbose=False):
+def run_cv_experiment(X, y, groups, n_classes, cv_splitter, aug_name, aug_params, hyperparams, model_name="EEGNet", verbose=False):
     history = {'train_acc': [], 'val_acc': [], 'train_loss': [], 'val_loss': []}
     best_accs = []
     
@@ -56,7 +56,7 @@ def run_cv_experiment(X, y, groups, n_classes, cv_splitter, exp_name, aug_params
     
     # Create descriptive folder name
     aug_str = str(aug_params).replace("{", "").replace("}", "").replace("'", "").replace(":", "-").replace(" ", "")[:30]
-    folder_name = f"{model_name}_{exp_name}_{timestamp}_{aug_str}"
+    folder_name = f"{model_name}_{aug_name}_{timestamp}_{aug_str}"
     log_dir = os.path.join(project_root, "runs", folder_name)
     writer = SummaryWriter(log_dir=log_dir)
     
@@ -73,7 +73,7 @@ def run_cv_experiment(X, y, groups, n_classes, cv_splitter, exp_name, aug_params
         y_tr_raw, y_val_raw = y[t_idx], y[v_idx]
 
         train_loader = DataLoader(
-            EEGStochasticDataset(X_tr_raw, y_tr_raw, exp_name, aug_params, multiplier=DATA_MULTIPLIER),
+            EEGStochasticDataset(X_tr_raw, y_tr_raw, aug_name, aug_params, multiplier=DATA_MULTIPLIER),
             batch_size=BS, shuffle=True
         )
 
@@ -86,10 +86,6 @@ def run_cv_experiment(X, y, groups, n_classes, cv_splitter, exp_name, aug_params
         # Model Selection
         if model_name == "EEGNet":
             model = EEGNet(nb_classes=n_classes, Chans=n_chans, Samples=n_time).to(config.DEVICE)
-        elif model_name == "DeepConvNet":
-            model = DeepConvNet(nb_classes=n_classes, Chans=n_chans, Samples=n_time).to(config.DEVICE)
-        elif model_name == "ShallowConvNet":
-            model = ShallowConvNet(nb_classes=n_classes, Chans=n_chans, Samples=n_time).to(config.DEVICE)
         elif model_name == "CustomEEGNet":
             model = CustomEEGNet(nb_classes=n_classes, Chans=n_chans, Samples=n_time).to(config.DEVICE)
         elif model_name == "SpectroTemporalTransformer":
