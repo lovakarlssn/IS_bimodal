@@ -1,4 +1,3 @@
-# experiments/cross_val.py
 import os
 import torch
 import torch.nn as nn
@@ -7,25 +6,18 @@ from torch.utils.data import DataLoader, Dataset, TensorDataset
 from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 import datetime
-import json
-import sys
-
-# Add parent directory to path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from augmentations.eeg_aug import get_augmentation
-from models.transformer import SpectroTemporalTransformer
-from models.eeg_models import *
+from sklearn.metrics import f1_score, cohen_kappa_score
+from collections import defaultdict
 import config
+from augmentations.apply_aug import get_augmentation
+from utils.get_model import get_model
 
-class EEGStochasticDataset(Dataset):
-    def __init__(self, X, y, aug_name, aug_params, multiplier=4, p_aug=0.5):
-        self.X = X
-        self.y = y
-        self.aug_name = aug_name
-        self.aug_params = aug_params
-        self.multiplier = multiplier
-        self.p_aug = p_aug
+class MultiModalDataset(Dataset):
+    def __init__(self, modality, X, y, aug_name, aug_params, multiplier=1, p_aug=0.5):
+        self.modality = modality
+        self.X, self.y = X, y
+        self.aug_name, self.aug_params = aug_name, aug_params
+        self.multiplier, self.p_aug = multiplier, p_aug
         self.num_original = len(X)
 
     def __len__(self):
@@ -33,114 +25,179 @@ class EEGStochasticDataset(Dataset):
 
     def __getitem__(self, idx):
         real_idx = idx % self.num_original
-        x = self.X[real_idx].copy()
-        label = self.y[real_idx]
-
-        if self.aug_name not in ["Original", "Non_Augmented"]:
-            if np.random.rand() < self.p_aug:
-                x_pair, _ = get_augmentation(self.aug_name, x[np.newaxis, ...], [label], self.aug_params)
-                x = x_pair[1] 
-
+        # COPY is crucial here to prevent modifying the original dataset in memory
+        x, label = self.X[real_idx].copy(), self.y[real_idx]
+        
+        # Apply Augmentation
+        if self.aug_name not in ["Original", "None"] and np.random.rand() < self.p_aug:
+            x_pair, _ = get_augmentation(self.modality, self.aug_name, x[np.newaxis, ...], [label], self.aug_params)
+            # get_augmentation returns [Original, Augmented]; take the augmented one (index 1)
+            x = x_pair[1]
+        
         x_tensor = torch.tensor(x, dtype=torch.float32)
-        if x_tensor.ndim == 2:
-            x_tensor = x_tensor.unsqueeze(0)
+        
+        # --- DIMENSION CHECKING ---
+        if self.modality == "EEG":
+            # EEGNet expects (1, Channels, Time)
+            if x_tensor.ndim == 2:
+                x_tensor = x_tensor.unsqueeze(0) 
+                
+        elif self.modality == "fMRI":
+            # 3DCNN expects (1, Depth, Height, Width)
+            if x_tensor.ndim == 3:
+                x_tensor = x_tensor.unsqueeze(0)
             
         return x_tensor, torch.tensor(label, dtype=torch.long)
 
-def run_cv_experiment(X, y, groups, n_classes, cv_splitter, aug_name, aug_params, hyperparams, model_name="EEGNet", verbose=False):
-    history = {'train_acc': [], 'val_acc': [], 'train_loss': [], 'val_loss': []}
-    best_accs = []
+def run_experiment(modality, X, y, groups, n_classes, cv_splitter, aug_name, aug_params, hyperparams, arch_config, model_name, verbose=False):
+    """
+    Generalized CV experiment runner.
+    Tracks Kappa and F1-Score for model selection.
+    """
+    best_val_metrics = []
     
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    # Global history to store metrics across all folds for averaging
+    # Structure: metric_name -> list of lists (folds x epochs)
+    global_history = defaultdict(list)
     
-    # Create descriptive folder name
-    aug_str = str(aug_params).replace("{", "").replace("}", "").replace("'", "").replace(":", "-").replace(" ", "")[:30]
-    folder_name = f"{model_name}_{aug_name}_{timestamp}_{aug_str}"
-    log_dir = os.path.join(project_root, "runs", folder_name)
-    writer = SummaryWriter(log_dir=log_dir)
+    # --- 1. LOGGING SETUP ---
+    timestamp = datetime.datetime.now().strftime('%d_%H%M')
+    base_log_dir = os.path.join("runs", f"{modality}_{model_name}", aug_name, timestamp)
     
-    BS = hyperparams.get("batch_size", 32)
-    LR = hyperparams.get("lr", 1e-4)
-    EPOCHS = hyperparams.get("epochs", 50)
-    W_DECAY = hyperparams.get("weight_decay", 1e-4)
-    DATA_MULTIPLIER = hyperparams.get("data_multiplier", 4) 
-    
+    if verbose:
+        print(f"Logging metrics to: {base_log_dir}")
+
+    # --- CROSS VALIDATION LOOP ---
     for fold, (t_idx, v_idx) in enumerate(cv_splitter.split(X, y, groups=groups)):
-        if verbose: print(f"\n>>> Starting Fold {fold+1}")
+        if verbose: print(f"\n--- Fold {fold+1} ---")
+        
+        # Local history for this specific fold
+        fold_history = defaultdict(list)
+        
+        # Create a separate writer for each fold
+        writer = SummaryWriter(log_dir=os.path.join(base_log_dir, f"fold_{fold+1}"))
 
-        X_tr_raw, X_val_raw = X[t_idx], X[v_idx]
-        y_tr_raw, y_val_raw = y[t_idx], y[v_idx]
-
+        # 2. Prepare Data Loaders
+        train_ds = MultiModalDataset(
+            modality, X[t_idx], y[t_idx], aug_name, aug_params, 
+            multiplier=hyperparams.get("multiplier", 1)
+        )
         train_loader = DataLoader(
-            EEGStochasticDataset(X_tr_raw, y_tr_raw, aug_name, aug_params, multiplier=DATA_MULTIPLIER),
-            batch_size=BS, shuffle=True
+            train_ds, batch_size=hyperparams.get("batch_size", 32), shuffle=True
+        )
+        
+        # Validation Data
+        X_v = torch.tensor(X[v_idx], dtype=torch.float32)
+        if modality == "EEG":
+            if X_v.ndim == 3: X_v = X_v.unsqueeze(1)
+        elif modality == "fMRI":
+            if X_v.ndim == 4: X_v = X_v.unsqueeze(1)
+            
+        val_loader = DataLoader(
+            TensorDataset(X_v, torch.tensor(y[v_idx], dtype=torch.long)), 
+            batch_size=hyperparams.get("batch_size", 32)
         )
 
-        X_val_t = torch.tensor(X_val_raw, dtype=torch.float32).unsqueeze(1)
-        y_val_t = torch.tensor(y_val_raw, dtype=torch.long)
-        val_loader = DataLoader(TensorDataset(X_val_t, y_val_t), batch_size=BS, shuffle=False)
-
-        n_chans, n_time = X_tr_raw.shape[-2], X_tr_raw.shape[-1]
-        
-        # Model Selection
-        if model_name == "EEGNet":
-            model = EEGNet(nb_classes=n_classes, Chans=n_chans, Samples=n_time).to(config.DEVICE)
-        elif model_name == "CustomEEGNet":
-            model = CustomEEGNet(nb_classes=n_classes, Chans=n_chans, Samples=n_time).to(config.DEVICE)
-        elif model_name == "SpectroTemporalTransformer":
-            model = SpectroTemporalTransformer(
-                nb_classes=n_classes, 
-                Chans=n_chans, 
-                Samples=n_time, 
-                sfreq=config.TARGET_FS
-            ).to(config.DEVICE)
-        else:
-            raise ValueError(f"Unknown model_name: {model_name}")
-
-        opt = optim.AdamW(model.parameters(), lr=LR, weight_decay=W_DECAY)
+        # 3. Model Setup
+        model = get_model(modality, model_name, n_classes, X[0].shape, arch_config=arch_config).to(config.DEVICE)
+        opt = optim.AdamW(model.parameters(), lr=hyperparams.get("lr", 1e-4), weight_decay=hyperparams.get("weight_decay", 1e-4))
         crit = nn.CrossEntropyLoss(label_smoothing=0.1)
         
-        f_best_acc = 0.0
-
-        for epoch in range(EPOCHS):
+        fold_best_kappa = -1.0
+        fold_best_acc = 0.0
+        
+        # --- EPOCH LOOP ---
+        for epoch in range(hyperparams.get("epochs", 50)):
+            
+            # A. Training
             model.train()
-            tr_a, tr_c = 0.0, 0
+            tr_loss_sum, tr_correct, tr_total = 0.0, 0, 0
             
             for xb, yb in train_loader:
                 xb, yb = xb.to(config.DEVICE), yb.to(config.DEVICE)
                 opt.zero_grad()
-                out = model(xb)
-                loss = crit(out, yb)
+                logits = model(xb)
+                loss = crit(logits, yb)
                 loss.backward()
                 opt.step()
-                tr_a += (out.argmax(1) == yb).sum().item(); tr_c += yb.size(0)
+                
+                tr_loss_sum += loss.item() * xb.size(0)
+                tr_correct += (logits.argmax(1) == yb).sum().item()
+                tr_total += yb.size(0)
+                
+            train_loss = tr_loss_sum / tr_total
+            train_acc = tr_correct / tr_total
             
-            # Validation
+            # B. Validation
             model.eval()
-            v_a, v_c = 0.0, 0
-            with torch.no_grad():
-                for xb_v, yb_v in val_loader:
-                    xb_v, yb_v = xb_v.to(config.DEVICE), yb_v.to(config.DEVICE)
-                    out_v = model(xb_v)
-                    v_a += (out_v.argmax(1) == yb_v).sum().item(); v_c += yb_v.size(0)
-
-            cur_acc = v_a/v_c
-            if cur_acc > f_best_acc: f_best_acc = cur_acc
+            val_loss_sum = 0.0
+            all_preds = []
+            all_targets = []
             
-            # Record per-epoch metric
-            if fold == 0: # Only record history detailed for first fold to save memory in return
-                history['train_acc'].append(tr_a/tr_c)
-                history['val_acc'].append(cur_acc)
-
-        best_accs.append(f_best_acc)
+            with torch.no_grad():
+                for xv, yv in val_loader:
+                    xv, yv = xv.to(config.DEVICE), yv.to(config.DEVICE)
+                    logits = model(xv)
+                    loss = crit(logits, yv)
+                    
+                    val_loss_sum += loss.item() * xv.size(0)
+                    preds = logits.argmax(1)
+                    
+                    all_preds.extend(preds.cpu().numpy())
+                    all_targets.extend(yv.cpu().numpy())
+            
+            val_loss = val_loss_sum / len(all_targets)
+            
+            # C. Robust Metrics (F1 & Kappa)
+            val_acc = np.mean(np.array(all_preds) == np.array(all_targets))
+            val_f1 = f1_score(all_targets, all_preds, average='macro')
+            val_kappa = cohen_kappa_score(all_targets, all_preds)
+            
+            # D. Logging & Storage
+            metrics_dict = {
+                'Loss/Train': train_loss,
+                'Loss/Val': val_loss,
+                'Accuracy/Train': train_acc,
+                'Accuracy/Val': val_acc,
+                'Metrics/F1_Macro': val_f1,
+                'Metrics/Kappa': val_kappa
+            }
+            
+            for key, val in metrics_dict.items():
+                writer.add_scalar(key, val, epoch)
+                fold_history[key].append(val)
+            
+            # E. Track Best (Based on Kappa)
+            if val_kappa > fold_best_kappa:
+                fold_best_kappa = val_kappa
+                fold_best_acc = val_acc 
         
-        if verbose: print(f" -> Fold {fold+1} Finished. Best Val Acc: {f_best_acc:.2%}")
+        # Append this fold's history to global history
+        for key, val_list in fold_history.items():
+            global_history[key].append(val_list)
 
-    # Metadata saving
-    with open(os.path.join(log_dir, "metadata.json"), "w") as f:
-        json.dump({"aug_params": aug_params, "hyperparams": hyperparams, "best_accs": best_accs}, f, indent=4)
+        best_val_metrics.append(fold_best_acc)
+        if verbose: 
+            print(f"    Best Val Kappa: {fold_best_kappa:.4f} (Acc: {fold_best_acc:.2%})")
 
-    writer.close()
-    return history, np.mean(best_accs)
+        writer.close()
 
+    # --- 4. MEAN SUMMARY LOGGING ---
+    print("Generating Mean Summary Log...")
+    mean_writer = SummaryWriter(log_dir=os.path.join(base_log_dir, "mean"))
+    
+    n_epochs = hyperparams.get("epochs", 50)
+    
+    for epoch in range(n_epochs):
+        for metric_name, folds_data in global_history.items():
+            # Collect values for this specific epoch across all folds
+            # Check length to handle potential early stopping differences
+            epoch_values = [fold[epoch] for fold in folds_data if len(fold) > epoch]
+            
+            if epoch_values:
+                mean_val = np.mean(epoch_values)
+                mean_writer.add_scalar(metric_name, mean_val, epoch)
+                
+    mean_writer.close()
+    
+    return np.mean(best_val_metrics)

@@ -3,11 +3,11 @@ import copy
 import numpy as np
 from sklearn.model_selection import StratifiedKFold, LeaveOneGroupOut
 from sklearn.model_selection import StratifiedKFold, GroupKFold
-from utils.io_utils import plot_history
+from utils.viz import plot_history
 from loaders.eeg_loader import load_eeg_dataset
 from experiments.cross_val import run_cv_experiment
 from experiments.ml_trainer import run_ml_experiment
-from utils.io_utils import save_experiment_results
+from utils.viz import save_experiment_results
 import config 
 import json
 import datetime

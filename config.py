@@ -2,18 +2,21 @@ import torch
 
 # --- SYSTEM ---
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-RESULTS_DIR = "../results"
+RESULTS_DIR = "./results"
+
+# --- EXPERIMENT CONTROL ---
+MODALITY = "EEG"           # "EEG" or "fMRI"
+EXP_MODE = "BOTH"          # "DL", "ML", or "BOTH"
+DATA_MODE = "loso"         # "loso" or "single"
+SUBJECT_ID = 1             # Only for single mode
 
 # --- DATASET ---
 TARGET_FS = 512
 TARGET_CHANS = 64
 BASE_TRIALS = 320 
 
-# --- DEFAULT RUN SETTINGS ---
-# These are used if arguments are not provided to master_main
-EXP_MODE = "BOTH"          # "DL", "ML", or "BOTH"
-DATA_MODE = "loso"         # "loso" or "single"
-SUBJECT_ID = 1             # Only for single mode
+# --- DATA PATHS ---
+DATA_DIR = "./data"
 
 # --- MODELS TO RUN (Default List) ---
 DL_MODELS = ["SpectroTemporalTransformer", "EEGNet"] 

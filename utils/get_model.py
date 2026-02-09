@@ -1,19 +1,34 @@
-# utils/get_model.py
-import models.transformer as transformer
-import models.eegnets as eegnets 
-import models.fmri_models as fmri_models
+from models.eeg_models import EEGNet, SpectroTemporalTransformer
+from models.fmri_models import Simple3DCNN
 
+def get_model(modality, model_name, n_classes, input_shape, arch_config=None):
+    """
+    Factory function to instantiate models with custom architecture configurations.
+    """
+    if arch_config is None:
+        arch_config = {}
 
-
-def get_model(model_name, n_classes, input_shape):
-    if model_name == "Transformer":
-        return transformer.SpectroTemporalTransformer(nb_classes=n_classes, input_shape=input_shape)
-    elif model_name == "EEGNet":
-        return eegnets.EEGNet(nb_classes=n_classes, Chans=input_shape[0], Samples=input_shape[1])
-    elif model_name == "CustomEEGNet":
-        return eegnets.CustomEEGNet(nb_classes=n_classes, Chans=input_shape[0], Samples=input_shape[1])
-    elif model_name == "SimpleFMRI":
-        pass
-    else:
-        raise ValueError(f"Unknown model_name: {model_name}")
+    if modality == "EEG":
+        if model_name == "EEGNet":
+            return EEGNet(
+                nb_classes=n_classes, 
+                Chans=input_shape[0], 
+                Samples=input_shape[1],
+                **arch_config
+            )
+        elif model_name == "Transformer":
+            return SpectroTemporalTransformer(
+                nb_classes=n_classes, 
+                Chans=input_shape[0], 
+                Samples=input_shape[1],
+                **arch_config
+            )
     
+    elif modality == "fMRI":
+        if model_name == "Simple3DCNN":
+            return Simple3DCNN(
+                nb_classes=n_classes,
+                **arch_config
+            )
+            
+    raise ValueError(f"Unknown model {model_name} for modality {modality}")

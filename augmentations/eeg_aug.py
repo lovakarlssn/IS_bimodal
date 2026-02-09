@@ -1,8 +1,9 @@
 # augmentations/eeg_aug.py
 import numpy as np
 
-# --- 1. SPATIAL DOMAIN ---
+# --- SPATIAL DOMAIN ---
 def channels_dropout(X, p_drop=0.2):
+    """Randomly sets entire channels to zero."""
     X_aug = X.copy()
     N, Ch, T = X_aug.shape
     for i in range(N):
@@ -10,8 +11,9 @@ def channels_dropout(X, p_drop=0.2):
         X_aug[i] = X_aug[i] * mask
     return X_aug
 
-# --- 2. FREQUENCY DOMAIN (The Winner: FT Surrogate) ---
+# --- FREQUENCY DOMAIN ---
 def freq_surrogate(X, phase_noise_max=0.5):
+    """Applies phase noise in the frequency domain to augment signals."""
     X_aug = np.zeros_like(X)
     N, Ch, T = X.shape
     for i in range(N):
@@ -24,11 +26,13 @@ def freq_surrogate(X, phase_noise_max=0.5):
         X_aug[i] = np.fft.irfft(new_f_transform, n=T, axis=-1).real
     return X_aug
 
-# --- 3. TIME DOMAIN ---
+# --- TIME DOMAIN ---
 def time_reverse(X):
+    """Flips the signal along the time axis."""
     return np.flip(X, axis=-1)
 
 def smooth_time_mask(X, mask_len_samples=100):
+    """Zeroes out a continuous block of time samples."""
     X_aug = X.copy()
     N, Ch, T = X_aug.shape
     for i in range(N):
@@ -38,16 +42,3 @@ def smooth_time_mask(X, mask_len_samples=100):
         mask[t_start : t_end] = 0
         X_aug[i] = X_aug[i] * mask[np.newaxis, :]
     return X_aug
-
-def get_augmentation(name, X, y, params):
-    if name == "ChannelsDropout":
-        X_aug = channels_dropout(X, **params.get("channels_dropout", {}))
-    elif name == "FTSurrogate":
-        X_aug = freq_surrogate(X, **params.get("freq_surrogate", {}))
-    elif name == "TimeReverse":
-        X_aug = time_reverse(X)
-    elif name == "SmoothTimeMask":
-        X_aug = smooth_time_mask(X, **params.get("smooth_time_mask", {}))
-    else:
-        return X, y
-    return np.concatenate([X, X_aug]), np.concatenate([y, y])
