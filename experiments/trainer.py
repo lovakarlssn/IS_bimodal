@@ -99,27 +99,3 @@ def run_training_session(
     return avg_acc
 
 
-if __name__ == "__main__":
-    # 2. Manual Override (e.g., specific fMRI architecture search)
-    print("\n>TEST fMRI: fMRI with Spatial Noise Augmentation and Custom Architecture")
-    fmri_results = run_training_session(
-        modality="fMRI",
-        data_mode="single",
-        model_name="Simple3DCNN",
-        aug_name="SpatialNoise",
-        hyperparams={"lr": 2e-5, "epochs": 5, "batch_size": 4, "multiplier": 1},
-        arch_config={"base_filters": 16, "kernel_size": 5} # Overriding architecture
-    )
-
-    # 3. Automation Loop Example (Tuning EEGNet kernels)
-    print("\n>>> TEST EEG: EEG with EEGNet and varying kernel sizes")
-    for kernel_size in [3, 5, 7]:
-        print(f"\nTesting EEGNet with kernel size {kernel_size}")
-        eeg_results = run_training_session(
-            modality="EEG",
-            data_mode="loso",
-            model_name="EEGNet",
-            aug_name="TimeShift",
-            hyperparams={"lr": 1e-4, "epochs": 10, "batch_size": 32, "multiplier": 2},
-            arch_config={"kernel_size": kernel_size} # Varying kernel size
-        )
