@@ -1,37 +1,41 @@
-# augmentations/apply_aug.py
 import numpy as np
 from .eeg_aug import channels_dropout, freq_surrogate, time_reverse, smooth_time_mask
-from .fmri_aug import spatial_noise, intensity_scale
-
+from .fmri_aug import (
+    add_gaussian_noise, 
+    random_contrast, 
+    random_affine, 
+    elastic_transform, 
+    cutout_volume,
+    intra_class_mixup
+)
 def get_augmentation(modality, name, X, y, params):
-    """
-    Unified entry point for data augmentation. 
-    Concatenates augmented data to the original batch.
-    """
-    if params is None: params = {}
-
-    if modality == "EEG":
-        if name == "ChannelsDropout":
-            X_aug = channels_dropout(X, **params.get("channels_dropout", {}))
-        elif name == "FTSurrogate":
-            X_aug = freq_surrogate(X, **params.get("freq_surrogate", {}))
-        elif name == "TimeReverse":
-            X_aug = time_reverse(X)
-        elif name == "SmoothTimeMask":
-            X_aug = smooth_time_mask(X, **params.get("smooth_time_mask", {}))
-        else: 
-            return X, y # Return original if no valid aug name
+    X_aug = np.zeros_like(X)
     
-    elif modality == "fMRI":
+    # Loop through every sample in the batch
+    for i in range(len(X)):
+        # Squeeze out the batch and channel dims to get (79, 95, 79)
+        # We'll put them back after
+        img_3d = np.squeeze(X[i]) 
+        
         if name == "SpatialNoise":
-            X_aug = spatial_noise(X, **params.get("spatial_noise", {}))
-        elif name == "IntensityScale":
-            X_aug = intensity_scale(X, **params.get("intensity_scale", {}))
-        else: 
-            return X, y
-    
-    else:
-        return X, y
+            aug_img = add_gaussian_noise(img_3d, params['noise_level'])
+        elif name == "RandomAffine":
+            aug_img = random_affine(img_3d)
+        elif name == "ElasticTransform":
+            aug_img = elastic_transform(img_3d)
+        elif name == "ROIMasking":
+            aug_img = cutout_volume(img_3d)
+        else:
+            # For things like IntensityScale that work fine on arrays
+            aug_img = random_contrast(img_3d)
+            
+        # Reshape back to (1, 79, 95, 79) and store
+        X_aug[i] = aug_img[np.newaxis, ...]
 
-    # Return concatenated dataset (Original + Augmented)
-    return np.concatenate([X, X_aug]), np.concatenate([y, y])
+    # Special case for Mixup which NEEDS the whole batch at once
+    if name == "IntraClassMixup":
+        X_aug, y_aug_labels = intra_class_mixup(X, y)
+    else:
+        y_aug_labels = y.copy()
+
+    return np.concatenate([X, X_aug]), np.concatenate([y, y_aug_labels])
