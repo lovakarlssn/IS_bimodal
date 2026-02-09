@@ -34,7 +34,7 @@ HYPERPARAMS = {
     "lr": 1e-4,
     "epochs": 20,
     "weight_decay": 1e-4,
-    "data_multiplier": 4 
+    "data_multiplier": 1 
 }
 
 # --- AUGMENTATION PARAMETERS ---
