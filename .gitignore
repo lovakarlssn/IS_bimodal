@@ -27,4 +27,4 @@ results/
 *.log
 *.json
 test.py
-/results
+
