@@ -24,8 +24,7 @@ ML_MODELS = ["SVM", "RF"]
 
 # --- AUGMENTATIONS TO RUN (Default List) ---
 # The script will run these one by one.
-EEG_AUGMENTATIONS = ["Original", "ChannelsDropout", "FTSurrogate", "TimeReverse", "SmoothTimeMask"]
-FMRI_AUGMENTATIONS = ["Original", "GaussianNoise", "RandomContrast", "RandomAffine", "CutoutVolume"]
+EXPERIMENTS = ["Original", "ChannelsDropout", "FTSurrogate", "TimeReverse", "SmoothTimeMask"]
 
 # --- HYPERPARAMETERS (Single Configuration) ---
 # NO LISTS HERE. Just the specific values for this run.
